@@ -1,7 +1,3 @@
-# mssql_Ansible_auto_failover_AG
-Auto failover Allways On
-
-
 # Ansible Failover Availability Groups
 
  > Este repositorio contiene un conjunto de playbooks de Ansible que te permiten automatizar el proceso de failover automático de SQL Server utilizando grupos de disponibilidad (AG) Always On.
