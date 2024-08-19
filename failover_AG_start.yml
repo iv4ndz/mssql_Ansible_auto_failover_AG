@@ -1,0 +1,66 @@
+- name: Playbook_Failover
+  connection: ansible.netcommon.network_cli
+  gather_facts: false
+  hosts: all
+  tasks:
+    - name: Chequeo de requerimientos
+      include_tasks: tasks/dba_requerimientos.yml
+      vars:
+        tasks_to_run:
+          - "Check if status_check_pre_failover table exists"
+          - "Print table check result"
+          - "Create Procedure insert_check_pre_failover"
+          - "Print procedure creation result"
+
+    - name: Ejecutar Stored Procedure (inventory Alias AG)
+      win_shell: 'sqlcmd -S {{ inventory_hostname }} -U {{ ansible_user }} -P {{ ansible_password }} -d DBA -Q "EXEC [dbo].[insert_check_pre_failover]"'
+
+    - name: Change AG Async to Sync
+      win_shell: |
+        $result = Invoke-Sqlcmd -ServerInstance "{{ inventory_hostname }}" -Database 'dba' -Username "{{ ansible_user }}" -Password "{{ ansible_password }}" -Query "SELECT Agname, replica_server_name FROM status_check_pre_failover WHERE Synchronous = 0 and AGname in (SELECT AGname FROM status_check_pre_failover  where replica_server_name= '{{ inventory_hostname }}' and IsPrimaryServer= 'Primary')"
+        $result | ForEach-Object {
+          $AGname = $_.AGname
+          $replicaServer = $_.replica_server_name
+          # Configurar el grupo Always On en modo sincrónico
+          Invoke-Sqlcmd -ServerInstance "{{ inventory_hostname }}" -Database 'master' -Username "{{ ansible_user }}" -Password "{{ ansible_password }}" -Query "ALTER AVAILABILITY GROUP [$AGname] MODIFY REPLICA ON '$replicaServer' WITH (AVAILABILITY_MODE = SYNCHRONOUS_COMMIT)"
+          Write-Output "Grupo Always On $AGname configurado en modo sincrónico en el servidor $replicaServer"
+        }
+      register: consulta_sql_output
+
+    - name: Mostrar salida de task Change AG Async to Sync
+      debug:
+        msg: "{{ consulta_sql_output.stdout.split('\r\n')}}"
+
+    - name: Check SYNC
+      include_tasks: tasks/check_synchronized.yml
+      vars:
+        tasks_to_run:
+          - "Check AVAILABILITY MODE STATUS" # Verificar el números de reintentos antes de cancelar el playbook.
+          - "Print STATUS"
+          - "Extract result_check_Sync from stdout_lines"
+          - "Execute cancel_playbook.yml if result_check_Sync_extracted = False"
+
+    - name: Failover de Availabulity Groups
+      include_tasks: tasks/alter_availability_group_task.yml
+      vars:
+        tasks_to_run:
+          - "Failover"
+          - "Log del Failover"
+
+    - name: Check SYNC -----Reboot
+      include_tasks: tasks/check_synchronized.yml
+      vars:
+        tasks_to_run:
+          - "Check AVAILABILITY MODE STATUS" # Verificar el números de reintentos antes de cancelar el playbook.
+          - "Print STATUS"
+          - "Extract result_check_Sync from stdout_lines"
+          - "Execute cancel_playbook.yml if result_check_Sync_extracted = False"
+
+    - name: Reboot Server
+      win_reboot:
+        reboot_timeout: 300 # Especifica el tiempo máximo en segundos que Ansible espera a que el servidor se reinicie.
+        post_reboot_delay: 60 # Especifica el tiempo en segundos que Ansible espera después de que el servidor se reinicie antes de continuar con las tareas siguientes.
+
+    - name: finished work
+      debug:
+        msg: "Tarea Finalizada"
