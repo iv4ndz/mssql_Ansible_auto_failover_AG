@@ -1,0 +1,59 @@
+#
+
+- name: Check AVAILABILITY MODE STATUS
+  win_shell: |
+    $query = @"
+    SELECT name, synchronization_state_desc
+    FROM sys.dm_hadr_database_replica_states drs
+    INNER JOIN sys.availability_groups ag ON drs.group_id = ag.group_id
+    WHERE drs.synchronization_state_desc <> 'SYNCHRONIZED' AND name IN (
+        SELECT name
+        FROM sys.dm_hadr_database_replica_states drs
+        INNER JOIN sys.availability_groups ag ON drs.group_id = ag.group_id
+        WHERE is_primary_replica = 1
+    )
+    "@
+
+    $result_check_Sync = $false
+    $max_attempts = 10           # Establece el número máximo de intentos
+
+    $attempts = 0  # Inicializa el contador de intentos
+
+    while (-not $result_check_Sync -and $attempts -lt $max_attempts) {
+        $result_check_Sync = Invoke-Sqlcmd -ServerInstance "{{ inventory_hostname }}" -Database 'dba' -Username "{{ ansible_user }}" -Password "{{ ansible_password }}" -Query $query
+
+        if ($result_check_Sync) {
+            $result_check_Sync | Format-Table -AutoSize
+            Write-Host "On hold: Los AG siguen en estado de SYNCHRONIZING OR NOT SYNCHRONIZED"
+            $result_check_Sync = $false
+            Start-Sleep -Seconds 30
+        } else {
+            Write-Host "Se continua con las tareas. Los AG se encuentran SYNCHRONIZED."
+            $result_check_Sync = $true
+        }
+
+        $attempts += 1  # Incrementa el contador de intentos en cada iteración
+    }
+
+    if (-not $result_check_Sync) {
+        $result_check_Sync = $false
+    }
+
+    $result_check_Sync
+  register: ps_result
+
+- name: Print STATUS
+  debug:
+    var: ps_result.stdout_lines
+
+- name: Extract result_check_Sync from stdout_lines
+  set_fact:
+    result_check_Sync_extracted: "{{ ps_result.stdout_lines[-1] }}"
+
+# - name: Imprimir el resultado de la variable result_check_Sync_extracted
+#   debug:
+#     var: result_check_Sync_extracted
+
+- name: Execute cancel_playbook.yml if result_check_Sync_extracted = False
+  include_tasks: tasks/cancel_playbook.yml
+  when: result_check_Sync_extracted | lower == "false"
