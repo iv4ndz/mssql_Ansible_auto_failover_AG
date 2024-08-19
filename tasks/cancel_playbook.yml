@@ -1,0 +1,5 @@
+# cancela el playbook
+
+- name: Cancelar playbook y finalizar proceso
+  fail:
+    msg: "Se ha cancelado el playbook."
