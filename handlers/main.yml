@@ -1,0 +1,10 @@
+---
+# handlers file for SQL_Failover_AG_auto
+
+
+---
+# Handlers for playbook
+
+- name: cancel_playbook_execution
+  fail:
+    msg: "Los AG no están en estado SYNCHRONIZED. Se cancela la ejecución del playbook."
