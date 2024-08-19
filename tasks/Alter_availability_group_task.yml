@@ -1,0 +1,57 @@
+# Tarea de Failover Availabulity Groups
+
+- name: Failover
+  win_shell: |
+    $query = "SELECT AGname, replica_server_name FROM [DBA].[dbo].[status_check_pre_failover] where AGname IN (select AGname FROM [DBA].[dbo].[status_check_pre_failover] where replica_server_name = '{{ inventory_hostname }}' and IsPrimaryServer = 'Primary') and replica_server_name <> '{{ inventory_hostname }}' "
+
+    $result = Invoke-Sqlcmd -ServerInstance {{ inventory_hostname }} -Database 'dba' -Username {{ ansible_user }} -Password {{ ansible_password }} -Query $query
+
+    # Iteración de resultados:
+    if ($result) {
+      # Iterar sobre los resultados y ejecutar el failover para cada AG
+      foreach ($row in $result) {
+        $agName = $row.AGname
+        $replicaServer = $row.replica_server_name
+
+        Write-Host "Realizando failover del AG: $agName al servidor: $replicaServer"
+                
+        # Ejecutar el failover
+        try {
+          # Ejecutar el comando ALTER AVAILABILITY GROUP para realizar el failover
+          Invoke-Sqlcmd -ServerInstance $replicaServer -Database master -Username {{ ansible_user }} -Password {{ ansible_password }} -Query "ALTER AVAILABILITY GROUP $agName FAILOVER"
+          Write-Host "Failover completado para el AG: $agName"
+
+          # Verificar el estado de sincronización después del failover
+          $syncStateQuery = "SELECT drs.synchronization_state_desc FROM sys.dm_hadr_database_replica_states drs, sys.availability_groups ag WHERE drs.group_id = ag.group_id and drs.synchronization_state_desc <> 'SYNCHRONIZED' and is_primary_replica = 1"
+                    
+          # Iniciar bucle while mientras el estado sea diferente de "SYNCHRONIZED"
+          while ($true) {
+            $syncStateResult = Invoke-Sqlcmd -ServerInstance $serverInstance -Database master -Username {{ ansible_user }} -Password {{ ansible_password }} -Query $syncStateQuery
+                        
+            if (!$syncStateResult) {
+              # Estado de sincronización = SYNCHRONIZED
+              break
+            }
+                        
+            # Esperar 10 segundos antes de volver a verificar el estado de sincronización
+            Write-Host 'Esperando 30s'
+            Start-Sleep -Seconds 30
+          }
+        }
+        catch {
+          Write-Host "Error al realizar el failover para el AG: $agName"
+          Write-Host $_.Exception.Message
+        }
+      }
+
+      Write-Host "Failover finalizado."
+    }
+    else {
+      Write-Host "No se encontraron AVAILABILITY GROUPS para mover."
+    }
+
+  register: result_output # Registra la salida del comando en una variable
+
+- name: Log del Failover
+  debug:
+    var: result_output.stdout_lines # Imprime la salida almacenada en la variable
