@@ -27,7 +27,7 @@ Auto failover Allways On
 
  En el inventario solo se deben agregar las instancias a reiniciar.
 
-> 💀 ***No colocar instancias Secundarias de Always On.*** En el inventario no puede figurar un nodo secundario que esté relacionado al primario. Ansible realiza el failover de los AG que están como Primario al nodo secundario. 
+> 💀 ***No colocar instancias Secundarias de Always On.*** En el inventario no puede figurar un nodo secundario que esté relacionado al primario. Ansible realiza el failover de los AG que están como Primarios al nodo secundario. 
 
 ## Ejecución del failover automático
 Para ejecutar el failover automático, utiliza el playbook failover_ag_start.yml ubicado en el directorio. Ejecuta el siguiente comando desde la máquina de control:
