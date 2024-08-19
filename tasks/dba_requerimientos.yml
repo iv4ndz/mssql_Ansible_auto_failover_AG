@@ -1,0 +1,89 @@
+# tasks file for SQL_Failover_AG_auto
+
+- name: Create Table status_check_pre_failover
+  win_shell: |
+    $script = @"
+    USE DBA;
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[status_check_pre_failover]') AND type in (N'U'))
+    BEGIN
+        CREATE TABLE [dbo].[status_check_pre_failover](
+            [id_Ag] [int] IDENTITY(1,1) NOT NULL,
+            [AGname] [varchar](50) NULL,
+            [replica_server_name] [varchar](50) NULL,
+            [IsPrimaryServer] [varchar](10) NULL,
+            [Synchronous] [tinyint] NULL,
+            [ReadableSecondary] [nvarchar](10) NULL,
+            [Failover_mode_desc] [varchar](10) NULL,
+            [DateExecution] [smalldatetime] NULL
+        ) ON [PRIMARY];
+        SELECT 'Table created';
+    END
+    ELSE
+    BEGIN
+        SELECT 'Table already exists';
+    END
+    "@
+
+    $result = sqlcmd -S "{{ inventory_hostname }}" -d "DBA" -U "{{ ansible_user }}" -P "{{ ansible_password }}" -Q $script
+
+    $result
+  register: table_creation_result
+
+- name: Print table creation result
+  debug:
+    var: table_creation_result.stdout_lines
+
+- name: Create Procedure insert_check_pre_failover
+  win_shell: |
+    $script = @"
+    USE DBA;
+    IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[insert_check_pre_failover]') AND type in (N'P', N'PC'))
+    BEGIN
+        EXEC('CREATE PROCEDURE [dbo].[insert_check_pre_failover] AS
+        BEGIN
+            TRUNCATE TABLE [DBA].[dbo].[status_check_pre_failover];
+
+            WITH AGStatus AS(
+            SELECT
+            [name] as AGname,
+            [replica_server_name],
+            CASE WHEN  (primary_replica  = replica_server_name) THEN  ''Primary''
+                 WHEN (primary_replica  != replica_server_name) THEN ''Secondary''
+            ELSE  '''' END AS IsPrimaryServer,
+            [secondary_role_allow_connections_desc] AS ReadableSecondary,
+            [availability_mode]  AS [Synchronous],
+            [failover_mode_desc]
+            FROM master.sys.availability_groups Groups
+            INNER JOIN master.sys.availability_replicas Replicas 
+                ON Groups.group_id = Replicas.group_id
+            INNER JOIN master.sys.dm_hadr_availability_group_states States 
+                ON Groups.group_id = States.group_id
+            )
+
+            INSERT INTO [dbo].[status_check_pre_failover] 
+            SELECT 
+            [AGname],
+            [replica_server_name],
+            [IsPrimaryServer],
+            [Synchronous],
+            [ReadableSecondary],
+            [Failover_mode_desc],
+            GETDATE()
+            FROM AGStatus
+        END')
+        SELECT 'Procedure created';
+    END
+    ELSE
+    BEGIN
+        SELECT 'Procedure already exists';
+    END
+    "@
+
+    $result = sqlcmd -S "{{ inventory_hostname }}" -d "DBA" -U "{{ ansible_user }}" -P "{{ ansible_password }}" -Q $script
+
+    $result
+  register: procedure_creation_result
+
+- name: Print procedure creation result
+  debug:
+    var: procedure_creation_result.stdout_lines
